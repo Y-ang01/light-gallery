@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="light-gallery" type="docker-deploy" factoryName="docker-image" server-name="Docker">
+    <deployment type="docker-image">
+      <settings>
+        <option name="imageTag" value="sha256:d60f360d7950ff5afb1335176a6b2c540d0ea1d02977b88a13ab81d4beb6ca96" />
+        <option name="containerName" value="" />
+      </settings>
+    </deployment>
+    <method v="2" />
+  </configuration>
+</component>
