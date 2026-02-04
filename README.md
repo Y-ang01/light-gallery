@@ -12,3 +12,21 @@
 - **缓存**: Redis 7
 - **部署**: Docker + Nginx 
 
+
+## 快速构建
+- **后端**
+- python 3.14.2
+- postgresql 16
+- redis 7
+- docker-compose up -d
+- cd backend
+- pip install -r requirements.txt
+- **前端**
+- npm install
+- npm run build
+- npm run dev
+- 注意修改start-dev中环境名称conda activate private-website
+
+## 快速启动
+- start-dev.bat  启动开发环境
+
