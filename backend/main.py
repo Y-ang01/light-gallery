@@ -1,4 +1,5 @@
 # backend/main.py
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,3 +25,12 @@ async def root():
         "docs": "http://localhost:8000/docs",
         "redoc": "http://localhost:8000/redoc"
     }
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="localhost",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

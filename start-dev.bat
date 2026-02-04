@@ -13,7 +13,7 @@ docker-compose up -d
 REM 启动后端服务
 echo 2. 启动后端服务...
 cd backend
-start cmd /k "conda activate private-website && python run.py"
+start cmd /k "conda activate private-website && python main.py"
 
 REM 启动前端服务
 echo 3. 启动前端服务...
