@@ -1,40 +1,46 @@
-// 文件路径: frontend/src/api/auth.ts
-import { http } from './http'
-import type { User, LoginData, RegisterData, TokenResponse } from '../types/auth'
+import { request } from '@/utils/request'
 
-export const authAPI = {
-  // 用户注册
-  async register(data: RegisterData): Promise<User> {
-    const response = await http.post('/auth/register', data)
-    return response.data
-  },
+// 登录
+export const login = (username: string, password: string) => {
+  return request.post('/auth/login', {
+    username,
+    password,
+  })
+}
 
-  // 用户登录
-  async login(data: LoginData): Promise<TokenResponse> {
-    const response = await http.post('/auth/login', data)
-    return response.data
-  },
+// 注册
+export const register = (username: string, email: string, password: string) => {
+  return request.post('/auth/register', {
+    username,
+    email,
+    password,
+  })
+}
 
-  // 用户登出
-  async logout(): Promise<void> {
-    await http.post('/auth/logout')
-  },
+// 获取个人信息
+export const getUserProfile = () => {
+  return request.get('/auth/profile')
+}
 
-  // 获取当前用户信息
-  async getCurrentUser(): Promise<User> {
-    const response = await http.get('/auth/me')
-    return response.data
-  },
+// 更新个人信息
+export const updateUserProfile = (data: { username?: string; profile?: string }) => {
+  return request.put('/auth/profile', data)
+}
 
-  // 刷新Token
-  async refreshToken(): Promise<TokenResponse> {
-    const response = await http.post('/auth/refresh')
-    return response.data
-  },
+// 上传头像
+export const uploadAvatar = (formData: FormData) => {
+  return request.post('/auth/avatar', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    onUploadProgress: (progressEvent) => {
+      const percent = (progressEvent.loaded / progressEvent.total!) * 100
+      console.log(`头像上传进度: ${percent.toFixed(2)}%`)
+    },
+  })
+}
 
-  // 更新用户信息
-  async updateUser(data: Partial<User>): Promise<User> {
-    const response = await http.put('/auth/me', data)
-    return response.data
-  },
+// 登出
+export const logout = () => {
+  return request.post('/auth/logout')
 }

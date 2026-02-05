@@ -1,70 +1,107 @@
-# 文件路径: backend/app/core/dependencies.py
+import os
+from datetime import datetime, timedelta
+from typing import Optional
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from ..core.database import get_db
-from ..core.security import verify_token
-from ..services.user_service import UserService
+from ..core.db import get_db
 from ..models.user import User
-import uuid
+from ..utils.security_utils import Role
 
-security = HTTPBearer()
+# 密码加密上下文
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# JWT配置
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-keep-it-safe")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30天有效期
+
+# OAuth2令牌获取
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-async def get_current_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+# 验证密码
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+# 加密密码
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+# 创建访问令牌
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now() + expires_delta
+    else:
+        expire = datetime.now() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+# 获取当前用户
+def get_current_user(
+        token: str = Depends(oauth2_scheme),
         db: Session = Depends(get_db)
 ) -> User:
-    """获取当前用户依赖项"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="无效的认证凭证",
+        detail="无法验证凭据",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
-    token = credentials.credentials
-    payload = verify_token(token)
-    if payload is None:
-        raise credentials_exception
-
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
-
     try:
-        user_uuid = uuid.UUID(user_id)
-    except ValueError:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
         raise credentials_exception
 
-    user = UserService.get_user_by_id(db, user_uuid)
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
-
     return user
 
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
-    """获取当前活跃用户"""
+# 角色权限依赖
+def get_current_active_user(
+        current_user: User = Depends(get_current_user),
+        required_role: Role = Role.USER
+):
+    # 检查用户是否激活
     if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="用户已被禁用")
-    return current_user
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户已被禁用"
+        )
 
+    # 检查角色权限
+    role_order = {
+        Role.GUEST: 0,
+        Role.USER: 1,
+        Role.AUTHOR: 2,
+        Role.ADMIN: 3
+    }
 
-async def get_current_admin_user(current_user: User = Depends(get_current_active_user)) -> User:
-    """获取当前管理员用户"""
-    if current_user.role != "ADMIN":
+    if role_order[current_user.role] < role_order[required_role]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要管理员权限"
+            detail="权限不足"
         )
+
     return current_user
 
 
-async def get_current_author_user(current_user: User = Depends(get_current_active_user)) -> User:
-    """获取当前作者用户"""
-    if current_user.role not in ["ADMIN", "AUTHOR"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要作者或管理员权限"
-        )
-    return current_user
+# 管理员权限依赖
+def admin_required(current_user: User = Depends(get_current_user)):
+    return get_current_active_user(current_user, Role.ADMIN)
+
+
+# 作者权限依赖
+def author_required(current_user: User = Depends(get_current_user)):
+    return get_current_active_user(current_user, Role.AUTHOR)
