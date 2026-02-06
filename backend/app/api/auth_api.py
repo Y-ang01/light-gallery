@@ -1,146 +1,170 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from fastapi.security import OAuth2PasswordRequestForm
+# backend/app/api/auth_api.py - 完整注册接口
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
+import re
+import uuid
+from datetime import datetime
+
 from ..core.db import get_db
 from ..core.dependencies import (
-    get_current_user, create_access_token, verify_password
+    get_password_hash, verify_password, create_access_token, get_current_user
 )
-from ..services.user_service import (
-    create_user, get_user_by_id, get_user_by_credentials,
-    update_user_profile, update_user_avatar
-)
-from ..utils.file_utils import (
-    ensure_dir, generate_unique_filename, validate_file_size
-)
-from ..utils.format_utils import model_to_dict
-import os
+from ..models.user import User, UserRole
 
 router = APIRouter()
 
 
-# 用户注册
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(
-        username: str,
-        email: str,
-        password: str,
+# 注册请求模型
+class RegisterRequest(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+
+    # 数据验证
+    @field_validator('username')
+    def validate_username(cls, v):
+        if len(v) < 3 or len(v) > 20:
+            raise ValueError('用户名长度必须在3-20字符之间')
+        if not re.match(r'^[a-zA-Z0-9_]+$', v):
+            raise ValueError('用户名只能包含字母、数字和下划线')
+        return v
+
+    @field_validator('password')
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError('密码长度至少6位')
+        return v
+
+
+# 登录请求模型
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+# 注册接口 - 确保路由路径正确
+@router.post("/register", summary="用户注册")
+async def register_user(
+        req: RegisterRequest,
         db: Session = Depends(get_db)
 ):
-    user = create_user(db, username, email, password)
+    try:
+        # 检查用户名是否已存在
+        existing_user = db.query(User).filter(User.username == req.username).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="用户名已存在")
 
-    # 创建访问令牌
-    access_token = create_access_token(
-        data={"sub": user.id}
-    )
+        # 检查邮箱是否已存在
+        existing_email = db.query(User).filter(User.email == req.email).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="邮箱已被注册")
 
-    return {
-        "code": 200,
-        "message": "注册成功",
-        "data": {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": model_to_dict(user, exclude=["hashed_password"])
-        }
-    }
-
-
-# 用户登录
-@router.post("/login")
-async def login(
-        form_data: OAuth2PasswordRequestForm = Depends(),
-        db: Session = Depends(get_db)
-):
-    user = get_user_by_credentials(db, form_data.username)
-
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-            headers={"WWW-Authenticate": "Bearer"},
+        # 创建新用户
+        new_user = User(
+            id=str(uuid.uuid4()),
+            username=req.username,
+            email=req.email,
+            hashed_password=get_password_hash(req.password),
+            role=UserRole.USER,
+            is_active=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
         )
 
-    # 创建访问令牌
-    access_token = create_access_token(
-        data={"sub": user.id}
-    )
+        # 保存到数据库
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
 
-    return {
-        "code": 200,
-        "message": "登录成功",
-        "data": {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": model_to_dict(user, exclude=["hashed_password"])
+        return {
+            "code": 200,
+            "message": "注册成功",
+            "data": {
+                "id": new_user.id,
+                "username": new_user.username,
+                "email": new_user.email
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"注册失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"注册失败: {str(e)}")
 
 
-# 获取个人信息
-@router.get("/profile")
-async def get_profile(
-        current_user=Depends(get_current_user),
+# 登录接口
+@router.post("/login", summary="用户登录")
+async def login_user(
+        req: LoginRequest,
         db: Session = Depends(get_db)
 ):
-    user = get_user_by_id(db, current_user.id)
+    try:
+        # 根据用户名查询用户
+        user = db.query(User).filter(User.username == req.username).first()
 
-    return {
-        "code": 200,
-        "message": "获取个人信息成功",
-        "data": model_to_dict(user, exclude=["hashed_password"])
-    }
+        # 检查用户是否存在
+        if not user:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+        # 检查用户是否激活
+        if not user.is_active:
+            raise HTTPException(status_code=401, detail="账号已被禁用")
 
-# 更新个人信息
-@router.put("/profile")
-async def update_profile(
-        username: str = None,
-        profile: str = None,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    user = update_user_profile(db, current_user.id, username, profile)
+        # 验证密码
+        if not verify_password(req.password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    return {
-        "code": 200,
-        "message": "更新个人信息成功",
-        "data": model_to_dict(user, exclude=["hashed_password"])
-    }
-
-
-# 上传头像
-@router.post("/avatar")
-async def upload_avatar(
-        file: UploadFile = File(...),
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    # 验证文件大小（5MB）
-    if file.size > 5 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="头像文件大小不能超过5MB"
+        # 创建token
+        access_token = create_access_token(
+            data={"sub": user.id, "username": user.username}
         )
 
-    # 确保目录存在
-    avatar_dir = f"static/avatars/{current_user.id}"
-    ensure_dir(avatar_dir)
+        return {
+            "code": 200,
+            "message": "登录成功",
+            "data": {
+                "token": access_token,
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "role": user.role.value,
+                    "avatar_url": user.avatar_url or ""
+                }
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"登录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="登录失败")
 
-    # 保存文件
-    filename = generate_unique_filename(file.filename)
-    file_path = os.path.join(avatar_dir, filename)
 
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    # 更新用户头像
-    avatar_url = f"/{file_path}"
-    user = update_user_avatar(db, current_user.id, avatar_url)
-
+# 获取用户信息
+@router.get("/info", summary="获取用户信息")
+async def get_user_info(
+        current_user: User = Depends(get_current_user)
+):
     return {
         "code": 200,
-        "message": "上传头像成功",
+        "message": "获取成功",
         "data": {
-            "avatar_url": avatar_url,
-            "user": model_to_dict(user, exclude=["hashed_password"])
+            "id": current_user.id,
+            "username": current_user.username,
+            "email": current_user.email,
+            "avatar_url": current_user.avatar_url or "",
+            "role": current_user.role.value,
+            "created_at": current_user.created_at.strftime("%Y-%m-%d %H:%M:%S")
         }
+    }
+
+
+# 登出接口
+@router.post("/logout", summary="用户登出")
+async def logout_user():
+    return {
+        "code": 200,
+        "message": "登出成功"
     }

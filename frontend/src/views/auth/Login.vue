@@ -1,55 +1,70 @@
+<!-- src/views/auth/Login.vue - 修复版 -->
 <template>
   <div class="login-container">
-    <el-card class="login-card">
-      <div class="card-header">
+    <div class="login-card">
+      <div class="login-header">
         <h2 class="login-title">光影收藏馆</h2>
-        <p class="login-desc">专业图片集管理展示平台</p>
+        <p class="login-subtitle">欢迎登录，开始您的创作之旅</p>
       </div>
 
       <el-form
         :model="loginForm"
         :rules="loginRules"
         ref="loginFormRef"
-        label-width="80px"
         class="login-form"
+        @keyup.enter="handleLogin"
       >
-        <el-form-item label="账号" prop="username">
-          <el-input v-model="loginForm.username" placeholder="请输入用户名或邮箱" prefix="User" />
+        <el-form-item prop="username">
+          <el-input
+            v-model="loginForm.username"
+            placeholder="请输入用户名"
+            prefix-icon="User"
+            size="large"
+            autocomplete="username"
+          />
         </el-form-item>
 
-        <el-form-item label="密码" prop="password">
+        <el-form-item prop="password">
           <el-input
             v-model="loginForm.password"
             type="password"
             placeholder="请输入密码"
-            prefix="Lock"
+            prefix-icon="Lock"
+            size="large"
+            autocomplete="current-password"
             show-password
           />
         </el-form-item>
 
-        <el-form-item label=" " prop="remember">
-          <el-checkbox v-model="loginForm.remember"> 记住登录状态（7天） </el-checkbox>
-          <el-button type="text" class="forgot-password" @click="goToForgotPassword">
-            忘记密码？
-          </el-button>
+        <el-form-item>
+          <el-checkbox v-model="loginForm.remember">记住我</el-checkbox>
+          <el-button type="text" class="forgot-password"> 忘记密码？ </el-button>
         </el-form-item>
 
-        <el-form-item label=" ">
-          <el-button type="primary" class="login-btn" @click="handleLogin" :loading="isLoading">
+        <el-form-item class="login-button-group">
+          <el-button
+            type="primary"
+            size="large"
+            class="login-btn"
+            @click="handleLogin"
+            :loading="isLoading"
+            :disabled="isLoading"
+          >
             登录
           </el-button>
-          <div class="register-link">
-            还没有账号？
-            <el-button type="text" @click="goToRegister"> 立即注册 </el-button>
-          </div>
         </el-form-item>
       </el-form>
-    </el-card>
+
+      <div class="login-footer">
+        <span>还没有账号？</span>
+        <el-button type="text" class="register-link" @click="goToRegister"> 立即注册 </el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElForm } from 'element-plus'
 import { useUserStore } from '@/store/modules/user'
@@ -63,44 +78,61 @@ const route = useRoute()
 const loginFormRef = ref<InstanceType<typeof ElForm> | null>(null)
 const isLoading = ref(false)
 
+// 登录表单
 const loginForm = ref({
   username: '',
   password: '',
-  remember: false,
+  remember: true,
 })
 
 // 表单校验规则
 const loginRules = ref({
-  username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
-  password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码长度不能少于6位', trigger: 'blur' },
-  ],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 })
 
-// 方法
+// 页面加载时检查
+onMounted(() => {
+  // 如果已登录，自动跳转到首页或指定页面
+  if (userStore.isLogin) {
+    const redirect = (route.query.redirect as string) || '/home'
+    router.push(redirect)
+  }
+})
+
 // 处理登录
 const handleLogin = async () => {
   try {
     // 表单校验
     await loginFormRef.value?.validate()
+
     isLoading.value = true
 
     // 调用登录接口
-    const success = await userStore.loginAction(loginForm.value)
+    const success = await userStore.loginAction({
+      username: loginForm.value.username,
+      password: loginForm.value.password,
+      remember: loginForm.value.remember,
+    })
 
     if (success) {
-      ElMessage.success('登录成功')
+      ElMessage.success('登录成功！')
 
-      // 跳转到之前的页面或首页
-      const redirect = route.query.redirect as string
-      await router.push(redirect || '/home')
+      // 获取跳转地址（修复：正确处理 redirect 参数）
+      const redirect = (route.query.redirect as string) || '/home'
+
+      // 安全检查：避免跳转到登录/注册页
+      if (redirect === '/login' || redirect === '/register') {
+        router.push('/home')
+      } else {
+        router.push(redirect)
+      }
     } else {
-      ElMessage.error('登录失败，请检查账号密码')
+      ElMessage.error('用户名或密码错误，请重试')
     }
   } catch (error) {
     console.error('登录失败:', error)
-    ElMessage.error('登录失败，请稍后重试')
+    ElMessage.error('登录失败，请检查您的账号信息')
   } finally {
     isLoading.value = false
   }
@@ -108,16 +140,7 @@ const handleLogin = async () => {
 
 // 前往注册页
 const goToRegister = () => {
-  const redirect = route.query.redirect as string
-  router.push({
-    path: '/register',
-    query: redirect ? { redirect } : {},
-  })
-}
-
-// 前往忘记密码页（暂未实现）
-const goToForgotPassword = () => {
-  ElMessage.info('忘记密码功能开发中')
+  router.push('/register')
 }
 </script>
 
@@ -126,63 +149,73 @@ const goToForgotPassword = () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
-  background-color: #f5f7fa;
-  background-image: linear-gradient(135deg, #e8f4f8 0%, #f0f8fb 100%);
+  min-height: 100vh;
+  background: linear-gradient(135deg, #e8f4f8 0%, #f0f8fb 100%);
+  padding: 20px;
 }
 
 .login-card {
-  width: 400px;
-  padding: 30px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border-radius: 12px !important;
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  padding: 40px;
 }
 
-.card-header {
+.login-header {
   text-align: center;
   margin-bottom: 30px;
 }
 
 .login-title {
   margin: 0 0 8px 0;
-  color: #1989fa;
   font-size: 24px;
   font-weight: 600;
+  color: #2c3e50;
 }
 
-.login-desc {
+.login-subtitle {
   margin: 0;
   color: #666;
   font-size: 14px;
 }
 
 .login-form {
-  margin-top: 20px;
-}
-
-.login-btn {
-  width: 100%;
-  height: 44px;
-  font-size: 16px;
-}
-
-.register-link {
-  margin-top: 16px;
-  text-align: center;
-  color: #666;
-  font-size: 14px;
+  margin-bottom: 20px;
 }
 
 .forgot-password {
   float: right;
   color: #1989fa !important;
+  font-size: 14px;
+}
+
+.login-button-group {
+  margin-top: 20px;
+}
+
+.login-btn {
+  width: 100%;
+  height: 48px;
+  font-size: 16px;
+}
+
+.login-footer {
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.register-link {
+  color: #1989fa !important;
+  font-weight: 500;
 }
 
 // 响应式适配
-@media (max-width: 768px) {
+@media (max-width: 480px) {
   .login-card {
-    width: 90%;
-    padding: 20px;
+    padding: 30px 20px;
   }
 }
 </style>

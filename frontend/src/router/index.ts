@@ -17,6 +17,7 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('@/views/auth/Login.vue'),
     meta: {
       title: '登录',
+      hidden: true,
       requiresAuth: false,
     },
   },
@@ -26,6 +27,7 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('@/views/auth/Register.vue'),
     meta: {
       title: '注册',
+      hidden: true,
       requiresAuth: false,
     },
   },
@@ -241,38 +243,52 @@ const router = createRouter({
   },
 })
 
-// 路由守卫
+// 修复版路由守卫 - 关键修复
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
 
   // 设置页面标题
   if (to.meta.title) {
-    document.title = `${to.meta.title} - ${import.meta.env.VITE_APP_TITLE}`
+    document.title = `${to.meta.title} - 光影收藏馆`
   }
 
-  // 不需要认证的路由直接放行
-  if (!to.meta.requiresAuth) {
+  // 1. 无需登录的白名单页面（修复：包含登录/注册/404）
+  const whiteList = ['/login', '/register', '/404']
+
+  // 2. 如果是白名单页面，直接放行
+  if (whiteList.includes(to.path)) {
     next()
     return
   }
 
-  // 检查是否已登录
-  const isLogin = await userStore.checkLoginStatus()
+  // 3. 非白名单页面，检查登录状态
+  try {
+    // 确保用户状态已加载
+    if (!userStore.isLogin) {
+      // 未登录，跳转到登录页，并携带跳转参数
+      next({
+        path: '/login',
+        query: {
+          redirect: to.fullPath,
+          t: Date.now() // 添加时间戳避免缓存问题
+        }
+      })
+      return
+    }
 
-  if (!isLogin) {
-    ElMessage.warning('请先登录')
-    next({ path: '/login', query: { redirect: to.fullPath } })
-    return
+    // 4. 已登录，检查管理员权限
+    if (to.meta.requiresAdmin && !userStore.isAdmin) {
+      next('/home')
+      return
+    }
+
+    // 5. 所有检查通过，放行
+    next()
+  } catch (error) {
+    // 异常处理：跳转到登录页
+    console.error('路由守卫异常:', error)
+    next('/login')
   }
-
-  // 检查管理员权限
-  if (to.meta.requiresAdmin && userStore.userInfo.role !== 'ADMIN') {
-    ElMessage.error('无管理员权限')
-    next({ path: '/403' })
-    return
-  }
-
-  next()
 })
 
 export default router

@@ -23,6 +23,6 @@ start cmd /k "npm run dev"
 echo ================================
 echo 服务启动完成
 echo 前端页面: http://localhost:5173
-echo 后端API: http://localhost:8000/
+echo 后端API: http://localhost:8000/docs
 echo ================================
 pause

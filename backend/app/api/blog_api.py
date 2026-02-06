@@ -1,277 +1,289 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+# backend/app/api/blog_api.py - 修复导入路径 + 完善接口
+from fastapi import APIRouter, HTTPException, Depends, Query, Path
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import os
+
+# 导入数据库依赖和服务
 from ..core.db import get_db
-from ..core.dependencies import get_current_user
 from ..services.blog_service import (
-    create_blog_post, get_blog_list, get_blog_detail, update_blog_post,
-    delete_blog_post, create_comment, get_blog_comments, delete_comment,
-    upload_blog_attachment
+    create_blog_post,
+    get_blog_post_by_id,
+    get_blog_posts,
+    update_blog_post,
+    delete_blog_post,
+    create_comment,
+    get_comments_by_blog_id,
+    delete_comment
 )
-from ..utils.format_utils import model_to_dict, format_pagination_response
+from ..core.dependencies import get_current_user
+from ..models.user import User
 
 router = APIRouter()
 
 
-# 创建博客
-@router.post("/posts", status_code=status.HTTP_201_CREATED)
-async def create_new_blog(
-        title: str,
-        content: str,
-        is_draft: bool = False,
-        is_private: bool = False,
-        cover_image_url: str = None,
-        tags: List[str] = None,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+# ========== Pydantic 模型 ==========
+class BlogCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="博客标题")
+    content: str = Field(..., min_length=10, description="博客内容")
+    cover_image_url: Optional[str] = Field("", description="封面图片URL")
+    tags: List[str] = Field([], description="标签列表")
+    is_draft: bool = Field(True, description="是否草稿")
+    is_private: bool = Field(False, description="是否私有")
+
+
+class BlogUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="博客标题")
+    content: Optional[str] = Field(None, min_length=10, description="博客内容")
+    cover_image_url: Optional[str] = Field(None, description="封面图片URL")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+    is_draft: Optional[bool] = Field(None, description="是否草稿")
+    is_private: Optional[bool] = Field(None, description="是否私有")
+
+
+class CommentCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=500, description="评论内容")
+    parent_id: Optional[str] = Field(None, description="父评论ID")
+
+
+# ========== 博客接口 ==========
+@router.post("/", summary="创建博客", response_model=Dict[str, Any])
+async def create_blog(
+        req: BlogCreateRequest,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
-    post = create_blog_post(
-        db=db,
-        user_id=current_user.id,
-        title=title,
-        content=content,
-        is_draft=is_draft,
-        is_private=is_private,
-        cover_image_url=cover_image_url,
-        tags=tags
-    )
-
-    return {
-        "code": 200,
-        "message": "博客创建成功",
-        "data": model_to_dict(post)
-    }
-
-
-# 获取博客列表
-@router.get("/posts")
-async def list_blogs(
-        page: int = 1,
-        page_size: int = 10,
-        keyword: str = None,
-        sort: str = "created_at",
-        order: str = "desc",
-        is_private: bool = None,
-        is_draft: bool = False,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    # 普通用户只能查看自己的草稿和公开博客
-    user_id = current_user.id if is_draft else None
-
-    posts, total = get_blog_list(
-        db=db,
-        user_id=user_id,
-        page=page,
-        page_size=page_size,
-        keyword=keyword,
-        sort=sort,
-        order=order,
-        is_private=is_private,
-        is_draft=is_draft
-    )
-
-    # 补充作者信息
-    posts_data = []
-    for post in posts:
-        post_dict = model_to_dict(post)
-        post_dict["author_username"] = post.user.username
-        posts_data.append(post_dict)
-
-    return {
-        "code": 200,
-        "message": "获取博客列表成功",
-        "data": format_pagination_response(
-            items=posts_data,
-            total=total,
-            page=page,
-            page_size=page_size
+    try:
+        blog = create_blog_post(
+            db=db,
+            title=req.title,
+            content=req.content,
+            cover_image_url=req.cover_image_url,
+            tags=req.tags,
+            is_draft=req.is_draft,
+            is_private=req.is_private,
+            user_id=current_user.id
         )
-    }
+        return {
+            "code": 200,
+            "message": "博客创建成功",
+            "data": blog.to_dict()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建博客失败: {str(e)}")
 
 
-# 获取博客详情
-@router.get("/posts/{post_id}")
-async def get_blog(
-        post_id: str,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+@router.get("/{blog_id}", summary="获取博客详情", response_model=Dict[str, Any])
+async def get_blog_detail(
+        blog_id: str = Path(..., description="博客ID"),
+        db: Session = Depends(get_db),
+        current_user: Optional[User] = Depends(get_current_user)
 ):
-    post = get_blog_detail(
-        db=db,
-        post_id=post_id,
-        user_id=current_user.id
-    )
+    try:
+        user_id = current_user.id if current_user else None
+        blog = get_blog_post_by_id(db=db, blog_id=blog_id, user_id=user_id)
 
-    post_dict = model_to_dict(post)
-    post_dict["author_username"] = post.user.username
+        if not blog:
+            raise HTTPException(status_code=404, detail="博客不存在或无访问权限")
 
-    return {
-        "code": 200,
-        "message": "获取博客详情成功",
-        "data": post_dict
-    }
+        return {
+            "code": 200,
+            "message": "获取博客成功",
+            "data": blog.to_dict()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取博客失败: {str(e)}")
 
 
-# 更新博客
-@router.put("/posts/{post_id}")
+@router.get("/", summary="获取博客列表", response_model=Dict[str, Any])
+async def get_blog_list(
+        page: int = Query(1, ge=1, description="页码"),
+        size: int = Query(10, ge=1, le=50, description="每页数量"),
+        keyword: str = Query("", description="搜索关键词"),
+        sort_field: str = Query("created_at", description="排序字段"),
+        sort_order: str = Query("desc", description="排序方式"),
+        is_draft: Optional[bool] = Query(None, description="是否草稿"),
+        db: Session = Depends(get_db),
+        current_user: Optional[User] = Depends(get_current_user)
+):
+    try:
+        user_id = current_user.id if current_user else None
+        skip = (page - 1) * size
+
+        blogs, total = get_blog_posts(
+            db=db,
+            skip=skip,
+            limit=size,
+            keyword=keyword,
+            sort_field=sort_field,
+            sort_order=sort_order,
+            user_id=user_id,
+            is_draft=is_draft
+        )
+
+        return {
+            "code": 200,
+            "message": "获取博客列表成功",
+            "data": {
+                "list": [blog.to_dict() for blog in blogs],
+                "total": total,
+                "page": page,
+                "size": size,
+                "pages": (total + size - 1) // size
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取博客列表失败: {str(e)}")
+
+
+@router.put("/{blog_id}", summary="更新博客", response_model=Dict[str, Any])
 async def update_blog(
-        post_id: str,
-        title: str = None,
-        content: str = None,
-        is_draft: bool = None,
-        is_private: bool = None,
-        cover_image_url: str = None,
-        tags: List[str] = None,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+        blog_id: str = Path(..., description="博客ID"),
+        req: BlogUpdateRequest = Depends(),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
-    post = update_blog_post(
-        db=db,
-        post_id=post_id,
-        user_id=current_user.id,
-        title=title,
-        content=content,
-        is_draft=is_draft,
-        is_private=is_private,
-        cover_image_url=cover_image_url,
-        tags=tags
-    )
+    try:
+        # 转换请求数据为字典（过滤 None 值）
+        update_data = {k: v for k, v in req.model_dump().items() if v is not None}
 
-    return {
-        "code": 200,
-        "message": "博客更新成功",
-        "data": model_to_dict(post)
-    }
-
-
-# 删除博客
-@router.delete("/posts/{post_id}")
-async def remove_blog(
-        post_id: str,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    result = delete_blog_post(
-        db=db,
-        post_id=post_id,
-        user_id=current_user.id
-    )
-
-    return {
-        "code": 200,
-        "message": "博客删除成功",
-        "data": {"success": result}
-    }
-
-
-# 获取博客评论
-@router.get("/posts/{post_id}/comments")
-async def list_blog_comments(
-        post_id: str,
-        page: int = 1,
-        page_size: int = 20,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    comments, total = get_blog_comments(
-        db=db,
-        post_id=post_id,
-        page=page,
-        page_size=page_size
-    )
-
-    # 补充评论作者信息
-    comments_data = []
-    for comment in comments:
-        comment_dict = model_to_dict(comment)
-        comment_dict["author_username"] = comment.user.username
-
-        # 处理回复
-        if hasattr(comment, 'replies') and comment.replies:
-            comment_dict["replies"] = []
-            for reply in comment.replies:
-                reply_dict = model_to_dict(reply)
-                reply_dict["author_username"] = reply.user.username
-                comment_dict["replies"].append(reply_dict)
-
-        comments_data.append(comment_dict)
-
-    return {
-        "code": 200,
-        "message": "获取评论列表成功",
-        "data": format_pagination_response(
-            items=comments_data,
-            total=total,
-            page=page,
-            page_size=page_size
+        blog = update_blog_post(
+            db=db,
+            blog_id=blog_id,
+            user_id=current_user.id,
+            **update_data
         )
-    }
+
+        if not blog:
+            raise HTTPException(status_code=404, detail="博客不存在或无修改权限")
+
+        return {
+            "code": 200,
+            "message": "博客更新成功",
+            "data": blog.to_dict()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新博客失败: {str(e)}")
 
 
-# 发表博客评论
-@router.post("/posts/{post_id}/comments")
-async def add_blog_comment(
-        post_id: str,
-        content: str,
-        parent_id: str = None,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+@router.delete("/{blog_id}", summary="删除博客", response_model=Dict[str, Any])
+async def delete_blog(
+        blog_id: str = Path(..., description="博客ID"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
-    comment = create_comment(
-        db=db,
-        post_id=post_id,
-        user_id=current_user.id,
-        content=content,
-        parent_id=parent_id
-    )
+    try:
+        success = delete_blog_post(
+            db=db,
+            blog_id=blog_id,
+            user_id=current_user.id
+        )
 
-    comment_dict = model_to_dict(comment)
-    comment_dict["author_username"] = current_user.username
+        if not success:
+            raise HTTPException(status_code=404, detail="博客不存在或无删除权限")
 
-    return {
-        "code": 200,
-        "message": "评论发表成功",
-        "data": comment_dict
-    }
+        return {
+            "code": 200,
+            "message": "博客删除成功",
+            "data": {}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除博客失败: {str(e)}")
 
 
-# 删除博客评论
-@router.delete("/comments/{comment_id}")
-async def remove_blog_comment(
-        comment_id: str,
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+# ========== 评论接口 ==========
+@router.post("/{blog_id}/comments", summary="创建评论", response_model=Dict[str, Any])
+async def create_blog_comment(
+        blog_id: str = Path(..., description="博客ID"),
+        req: CommentCreateRequest = Depends(),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
-    result = delete_comment(
-        db=db,
-        comment_id=comment_id,
-        user_id=current_user.id
-    )
+    try:
+        # 检查博客是否存在
+        blog = get_blog_post_by_id(db=db, blog_id=blog_id, user_id=current_user.id)
+        if not blog:
+            raise HTTPException(status_code=404, detail="博客不存在")
 
-    return {
-        "code": 200,
-        "message": "评论删除成功",
-        "data": {"success": result}
-    }
+        comment = create_comment(
+            db=db,
+            content=req.content,
+            blog_id=blog_id,
+            user_id=current_user.id,
+            parent_id=req.parent_id
+        )
+
+        return {
+            "code": 200,
+            "message": "评论创建成功",
+            "data": comment.to_dict()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建评论失败: {str(e)}")
 
 
-# 上传博客附件
-@router.post("/upload-attachment")
-async def upload_attachment(
-        file: UploadFile = File(...),
-        current_user=Depends(get_current_user),
-        db: Session = Depends(get_db)
+@router.get("/{blog_id}/comments", summary="获取博客评论", response_model=Dict[str, Any])
+async def get_blog_comments(
+        blog_id: str = Path(..., description="博客ID"),
+        page: int = Query(1, ge=1, description="页码"),
+        size: int = Query(20, ge=1, le=50, description="每页数量"),
+        db: Session = Depends(get_db),
+        current_user: Optional[User] = Depends(get_current_user)
 ):
-    file_path = upload_blog_attachment(
-        db=db,
-        file=file,
-        user_id=current_user.id
-    )
+    try:
+        skip = (page - 1) * size
+        comments, total = get_comments_by_blog_id(
+            db=db,
+            blog_id=blog_id,
+            skip=skip,
+            limit=size
+        )
 
-    return {
-        "code": 200,
-        "message": "附件上传成功",
-        "data": {"url": file_path, "filename": file.filename}
-    }
+        return {
+            "code": 200,
+            "message": "获取评论成功",
+            "data": {
+                "list": [comment.to_dict() for comment in comments],
+                "total": total,
+                "page": page,
+                "size": size,
+                "pages": (total + size - 1) // size
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取评论失败: {str(e)}")
+
+
+@router.delete("/comments/{comment_id}", summary="删除评论", response_model=Dict[str, Any])
+async def delete_blog_comment(
+        comment_id: str = Path(..., description="评论ID"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    try:
+        success = delete_comment(
+            db=db,
+            comment_id=comment_id,
+            user_id=current_user.id
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail="评论不存在或无删除权限")
+
+        return {
+            "code": 200,
+            "message": "评论删除成功",
+            "data": {}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除评论失败: {str(e)}")

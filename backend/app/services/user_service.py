@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from ..models.user import User
 from ..utils.security_utils import (
-    get_password_hash, verify_password, validate_username,
+    validate_username,
     validate_email, validate_password_strength
 )
 
