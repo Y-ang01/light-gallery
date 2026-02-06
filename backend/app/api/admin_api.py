@@ -1,18 +1,19 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from typing import List
+
 from ..core.db import get_db
 from ..core.dependencies import admin_required
-from ..models.user import User
 from ..models.album import Album
-from ..models.image import Image
 from ..models.blog import BlogPost, Comment
+from ..models.image import Image
+from ..models.user import User
 from ..services.user_service import (
     get_all_users, update_user_role, toggle_user_active
 )
-from ..utils.security_utils import Role
 from ..utils.format_utils import model_to_dict, format_pagination_response
+from ..utils.security_utils import Role
 
 router = APIRouter()
 

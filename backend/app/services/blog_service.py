@@ -1,13 +1,14 @@
 # backend/app/services/blog_service.py - 修复导入 + 完善逻辑
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
 import uuid
 from datetime import datetime
+from typing import Optional
 
+from sqlalchemy import or_, and_
+from sqlalchemy.orm import Session
+
+from backend.app.models.blog import Blog
 # 现在能正确导入（BlogPost 是 Blog 的别名，Comment 已定义）
 from ..models.blog import BlogPost, Comment
-from ..models.user import User
 
 
 # ========== 博客相关服务 ==========
@@ -17,11 +18,13 @@ def create_blog_post(
         content: str,
         user_id: str,
         cover_image_url: str = "",
-        tags: List[str] = [],
+        tags=None,
         is_draft: bool = True,
         is_private: bool = False
 ) -> BlogPost:
     """创建博客"""
+    if tags is None:
+        tags = []
     blog_post = BlogPost(
         id=str(uuid.uuid4()),
         title=title,
@@ -77,7 +80,7 @@ def get_blog_posts(
         sort_order: str = "desc",
         user_id: Optional[str] = None,
         is_draft: Optional[bool] = None
-) -> tuple[List[BlogPost], int]:
+) -> tuple[list[type[Blog]], int]:
     """获取博客列表"""
     query = db.query(BlogPost)
 
@@ -124,7 +127,7 @@ def update_blog_post(
         blog_id: str,
         user_id: str,
         **kwargs
-) -> Optional[BlogPost]:
+) -> type[Blog] | None:
     """更新博客"""
     blog_post = db.query(BlogPost).filter(
         BlogPost.id == blog_id,
@@ -194,7 +197,7 @@ def get_comments_by_blog_id(
         blog_id: str,
         skip: int = 0,
         limit: int = 20
-) -> tuple[List[Comment], int]:
+) -> tuple[list[type[Comment]], int]:
     """获取博客评论"""
     query = db.query(Comment).filter(
         Comment.blog_id == blog_id,
