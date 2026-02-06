@@ -23,11 +23,7 @@ class Album(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
 
     # 关联关系 - 使用完整模块路径
-    user = relationship(
-        "app.models.user.User",
-        backref="albums",
-        lazy="joined"
-    )
+    user = relationship("User", back_populates="albums")
 
     def __repr__(self):
         return f"<Album(id={self.id}, name={self.name}, user_id={self.user_id})>"

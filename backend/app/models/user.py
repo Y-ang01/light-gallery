@@ -2,6 +2,9 @@
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Enum, Boolean
 import enum
+
+from sqlalchemy.orm import relationship
+
 from .base import Base
 
 
@@ -31,6 +34,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, comment="是否激活")
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+    albums = relationship("Album", back_populates="user")
 
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, email={self.email})>"
