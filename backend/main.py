@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
 import logging
+from app.core.db import init_database
 # 加载环境变量
 from dotenv import load_dotenv
 
@@ -16,29 +17,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# --- 生命周期处理器 ---
+# 生命周期函数：启动时初始化数据库
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动逻辑
-    logger.info("FastAPI application starting up...")
-    try:
-        from app.core.db import init_db
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
-
-    yield  # 应用运行中
-
-    # 关闭逻辑
-    logger.info("FastAPI application shutting down...")
-    try:
-        from app.core.db import close_db
-        close_db()
-    except Exception as e:
-        logger.error(f"Failed to close database: {e}")
-
+    # 启动前
+    logger.info("🚀 FastAPI application starting up...")
+    init_database()  # 调用重构后的初始化函数
+    yield
+    # 关闭后
+    logger.info("🛑 FastAPI application shutting down...")
 
 # 创建应用
 app = FastAPI(

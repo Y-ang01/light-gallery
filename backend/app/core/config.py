@@ -1,7 +1,6 @@
 # backend/app/core/config.py - 新增配置文件
 import os
 import urllib.parse
-from typing import Optional
 
 
 class Settings:
@@ -11,17 +10,7 @@ class Settings:
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")
     POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "light_gallery")
-
-    # 关键：URL 编码密码（处理特殊字符）
-    @property
-    def DATABASE_URL(self) -> str:
-        encoded_password = urllib.parse.quote_plus(self.POSTGRES_PASSWORD)
-
-        # PostgreSQL 连接 URL 格式
-        return (
-            f"postgresql+psycopg2://{self.POSTGRES_USER}:{encoded_password}"
-            f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
+    DATABASE_URI: str = "postgresql://postgres:123456@localhost:5432/light_gallery"
 
     # 应用配置
     API_V1_STR: str = "/api/v1"
